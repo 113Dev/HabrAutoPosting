@@ -1,4 +1,6 @@
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from dotenv import load_dotenv
 
@@ -8,9 +10,15 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SQLALCHEMY_URL = os.getenv("SQLALCHEMY_URL")
 
-bot: Bot = Bot(str(BOT_TOKEN))
+bot: Bot = Bot(str(BOT_TOKEN), default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp: Dispatcher = Dispatcher()
+
+TARGET_CHAT_ID = -1003766155088
+SEND_DELAY_SECONDS = 1
+POLL_INTERVAL_SECONDS = 1800
+RETRY_DELAY_SECONDS = 5
 
 url: str = "/ru/search/?q=python&target_type=posts&order=date"
 
