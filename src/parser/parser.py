@@ -1,23 +1,20 @@
 import asyncio
 import re
 
-import google.generativeai as gemini
 import httpx
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
-from config import GEMINI_API_KEY, promt
+from ai.service import UserGeminiService
+from config import promt
 
-
-gemini.configure(api_key=str(GEMINI_API_KEY))
 
 stop_event = asyncio.Event()
 
-model = gemini.GenerativeModel(
-	"gemini-2.5-flash",
-	system_instruction=promt,
-)
-headers = {"User-Agent": UserAgent().random}
+
+def _get_random_headers() -> dict[str, str]:
+	"""Генерирует случайный User-Agent для каждого запроса."""
+	return {"User-Agent": UserAgent().random}
 
 
 def set_stop(value: bool) -> None:
@@ -87,13 +84,18 @@ def split_text(text: str, max_length: int = 3500) -> list[str]:
 class HabrParser:
 	"""Отвечает за парсинг статей с Habr."""
 
-	def __init__(self, url: str) -> None:
+	def __init__(
+		self,
+		url: str,
+		ai_service: UserGeminiService | None = None,
+	) -> None:
 		self.url = "https://habr.com/" + url.lstrip("/")
+		self.ai_service = ai_service or UserGeminiService(prompt=promt)
 
 	async def get_link(self) -> dict[str, str]:
 		"""Получает ссылку и заголовок последней статьи по запросу."""
-		async with httpx.AsyncClient() as client:
-			resp = await client.get(self.url, headers=headers)
+		async with httpx.AsyncClient(timeout=30.0) as client:
+			resp = await client.get(self.url, headers=_get_random_headers())
 			resp.raise_for_status()
 
 			fixed_html = fix_html(resp.text)
@@ -101,13 +103,13 @@ class HabrParser:
 			header = soup.find("h2", class_="tm-title tm-title_h2")
 
 			if not header:
-				raise ValueError("link is None!")
+				raise ValueError("No header found!")
 
 			title = header.get_text(strip=True)
 			link_tag = header.find("a", class_="tm-title__link")
 
 			if not link_tag or not link_tag.get("href"):
-				raise ValueError("link is None!")
+				raise ValueError("No link found!")
 
 			return {
 				"title": str(title),
@@ -116,8 +118,8 @@ class HabrParser:
 
 	async def get_short_content(self, url: str) -> str:
 		"""Парсит текст статьи и сокращает его с помощью Gemini."""
-		async with httpx.AsyncClient() as client:
-			resp = await client.get(url, headers=headers)
+		async with httpx.AsyncClient(timeout=30.0) as client:
+			resp = await client.get(url, headers=_get_random_headers())
 			resp.raise_for_status()
 
 			fixed_html = fix_html(resp.text)
@@ -128,6 +130,5 @@ class HabrParser:
 				raise ValueError("Пусто!")
 
 			content = article_content.get_text(separator="\n", strip=True)
-			response = await model.generate_content_async(content)
-
-			return fix_markdown(str(response.text))
+			response_text = await self.ai_service.generate_text(content)
+			return fix_markdown(response_text)

@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: habr_autopost_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: habr_user
+      POSTGRES_PASSWORD: habr_password
+      POSTGRES_DB: habr_autopost
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U habr_user -d habr_autopost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build: .
+    container_name: habr_autopost_bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SQLALCHEMY_URL: postgresql+asyncpg://habr_user:habr_password@db:5432/habr_autopost
+      BOT_TOKEN: ${BOT_TOKEN}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    env_file:
+      - .env
+
+volumes:
+  postgres_data:

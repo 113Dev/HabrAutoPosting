@@ -9,18 +9,17 @@ import os
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SQLALCHEMY_URL = os.getenv("SQLALCHEMY_URL")
 
 bot: Bot = Bot(str(BOT_TOKEN), default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp: Dispatcher = Dispatcher()
 
-TARGET_CHAT_ID = -1003766155088
 SEND_DELAY_SECONDS = 1
-POLL_INTERVAL_SECONDS = 1800
+POLL_INTERVAL_SECONDS = 7200
 RETRY_DELAY_SECONDS = 5
+CHECK_NEW_ARTICLE_INTERVAL_SECONDS = 3600 
 
-url: str = "/ru/search/?q=python&target_type=posts&order=date"
+url: str = "/ru/feed/"
 
 promt = (
 	"Ты профессиональный технический копирайтер и редактор IT-контента на русском языке. Твоя задача — обрабатывать статьи на IT-тематику по следующим правилам:\n"

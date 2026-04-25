@@ -1,96 +1,223 @@
-import asyncio
-
-from aiogram import Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from config import (
-	url,
-	TARGET_CHAT_ID,
-	SEND_DELAY_SECONDS,
-	POLL_INTERVAL_SECONDS,
-	RETRY_DELAY_SECONDS
+from ai.service import get_missing_user_ai_settings
+from bot.utils import render_prompt_text, render_settings_text
+from bot.keyboards import get_prompt_keyboard, get_settings_keyboard, get_start_keyboard, get_delays_keyboard
+from bot.states import SettingsStates
+from db.crud import (
+    get_or_create_user,
+	get_user_by_tg_id,
+	set_check_interval,
+	set_gemini_api,
+	set_gemini_model,
+	set_poll_interval,
+	set_prompt,
+	set_target_chat_id,
+	set_url
 )
-from keyboards import get_start_keyboard
-from parser.parser import HabrParser, set_stop, split_text, stop_event
+from parser.parser import set_stop
 
 router = Router()
 
 
-async def _send_article(message: Message, article: dict[str, str], content: str) -> None:
-	"""Отправляет статью в канал по частям с fallback на plain text."""
-	title = article["title"].replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
-	header = f"*{title}*\n\nСсылка на оригинальную статью: {article['link']}"
-
-	for index, part in enumerate(split_text(content)):
-		message_text = f"{header}\n\n{part}" if index == 0 else part
-
-		try:
-			await message.bot.send_message(
-				chat_id=TARGET_CHAT_ID,
-				text=message_text,
-			)
-		except TelegramBadRequest:
-			await message.bot.send_message(
-				chat_id=TARGET_CHAT_ID,
-				text=message_text.replace("*", "").replace("`", ""),
-			)
-
-		await asyncio.sleep(SEND_DELAY_SECONDS)
-
-
-async def _wait_for_next_article(parser: HabrParser, current_article: dict[str, str]) -> None:
-	"""Ждёт появления новой статьи, пока рассылка не будет остановлена."""
-	while not stop_event.is_set():
-		await asyncio.sleep(POLL_INTERVAL_SECONDS)
-		new_article = await parser.get_link()
-
-		if current_article["title"] != new_article["title"]:
-			return
-
-
-async def run_auto_post(message: Message) -> None:
-	"""Запускает мониторинг новых статей и публикует их в канал."""
-	set_stop(False)
-	await message.answer(
-		"*Начало рассылки*"
-	)
-
-	try:
-		while not stop_event.is_set():
-			try:
-				parser = HabrParser(url=url)
-				article = await parser.get_link()
-				content = await parser.get_short_content(article["link"])
-
-				await _send_article(message, article, content)
-				await _wait_for_next_article(parser, article)
-			except Exception as error:
-				await message.answer(
-					f"*Ошибка рассылки:* {error}"
-				)
-				await asyncio.sleep(RETRY_DELAY_SECONDS)
-	except asyncio.CancelledError:
-		pass
-
-
 @router.message(Command("start"))
 async def start_message(message: Message) -> None:
-	"""Приветствует пользователя и показывает стартовые кнопки."""
+	"""Приветствует пользователя, создаёт его в БД и показывает стартовые кнопки."""
 	if not message.from_user:
 		return
 
+	user = await get_or_create_user(
+		tg_id=message.from_user.id,
+		username=message.from_user.username or str(message.from_user.id),
+	)
+
+	missing_settings = get_missing_user_ai_settings(user)
+	warning_text = ""
+	if missing_settings:
+		warning_text = (
+			"\n\n*Не заполнены настройки:* "
+			f"{', '.join(missing_settings)}.\n"
+			"Перед запуском автопоста откройте настройки."
+		)
+
 	await message.answer(
-		"*Добро пожаловать в Habr Auto Poster!*",
+		f"*Добро пожаловать в Habr Auto Poster!*{warning_text}",
 		reply_markup=get_start_keyboard(),
 	)
 
 
-@router.message(Command("stop_post"))
+@router.message(F.text.lower() == "стоп")
 async def stop_auto_post(message: Message) -> None:
 	"""Останавливает рассылку статей."""
 	set_stop(True)
 	await message.answer(
-		"*Рассылка остановлена*"
+		"*Рассылка остановлена*",
+		reply_markup=get_start_keyboard()
 	)
+
+
+@router.message(SettingsStates.waiting_url, F.text)
+async def save_url(message: Message, state: FSMContext) -> None:
+	"""Сохраняет новый URL пользователя."""
+	if not message.from_user or not message.text:
+		return
+
+	url = message.text.strip().removeprefix("https://habr.com/").removeprefix("habr.com/")
+
+	await set_url(message.from_user.id, url)
+	await state.clear()
+
+	user = await get_user_by_tg_id(message.from_user.id)
+	if user is None:
+		return
+
+	await message.answer(
+		render_settings_text(user),
+		reply_markup=get_settings_keyboard(),
+	)
+
+
+@router.message(SettingsStates.waiting_api_key, F.text)
+async def save_api_key(message: Message, state: FSMContext) -> None:
+	"""Сохраняет новый API ключ пользователя."""
+	if not message.from_user or not message.text:
+		return
+
+	await set_gemini_api(message.from_user.id, message.text.strip())
+	await state.clear()
+
+	user = await get_user_by_tg_id(message.from_user.id)
+	if user is None:
+		return
+
+	await message.answer(
+		render_settings_text(user),
+		reply_markup=get_settings_keyboard(),
+	)
+
+
+@router.message(SettingsStates.waiting_model, F.text)
+async def save_model(message: Message, state: FSMContext) -> None:
+	"""Сохраняет новую Gemini модель пользователя."""
+	if not message.from_user or not message.text:
+		return
+
+	await set_gemini_model(message.from_user.id, message.text.strip())
+	await state.clear()
+
+	user = await get_user_by_tg_id(message.from_user.id)
+	if user is None:
+		return
+
+	await message.answer(
+		render_settings_text(user),
+		reply_markup=get_settings_keyboard(),
+	)
+
+
+@router.message(SettingsStates.waiting_prompt, F.text)
+async def save_prompt(message: Message, state: FSMContext) -> None:
+	"""Сохраняет новый prompt пользователя."""
+	if not message.from_user or not message.text:
+		return
+
+	await set_prompt(message.from_user.id, message.text.strip())
+	await state.clear()
+
+	user = await get_user_by_tg_id(message.from_user.id)
+	if user is None:
+		return
+
+	await message.answer(
+		render_prompt_text(user),
+		reply_markup=get_prompt_keyboard(),
+	)
+
+
+@router.message(SettingsStates.waiting_check_interval, F.text)
+async def save_check_interval(message: Message, state: FSMContext) -> None:
+	"""Сохраняет интервал проверки новых статей."""
+	if not message.from_user or not message.text:
+		return
+
+	try:
+		interval = int(message.text.strip())
+		if interval < 10:
+			await message.answer("*Ошибка:* интервал должен быть не менее 10 секунд")
+			return
+
+		await set_check_interval(message.from_user.id, interval)
+		await state.clear()
+
+		user = await get_user_by_tg_id(message.from_user.id)
+		if user is None:
+			return
+
+		text = (
+			"*Настройка задержек постинга*\n\n"
+			f"Интервал проверки: `{user.check_interval}` сек\n"
+			f"Время ожидания: `{user.poll_interval}` сек"
+		)
+
+		await message.answer(text, reply_markup=get_delays_keyboard())
+	except ValueError:
+		await message.answer("*Ошибка:* введите число")
+
+
+@router.message(SettingsStates.waiting_poll_interval, F.text)
+async def save_poll_interval(message: Message, state: FSMContext) -> None:
+	"""Сохраняет максимальное время ожидания."""
+	if not message.from_user or not message.text:
+		return
+
+	try:
+		interval = int(message.text.strip())
+		if interval < 60:
+			await message.answer("*Ошибка:* время ожидания должно быть не менее 60 секунд")
+			return
+
+		await set_poll_interval(message.from_user.id, interval)
+		await state.clear()
+
+		user = await get_user_by_tg_id(message.from_user.id)
+		if user is None:
+			return
+
+		text = (
+			"*Настройка задержек постинга*\n\n"
+			f"Интервал проверки: `{user.check_interval}` сек\n"
+			f"Время ожидания: `{user.poll_interval}` сек"
+		)
+
+		await message.answer(text, reply_markup=get_delays_keyboard())
+	except ValueError:
+		await message.answer("*Ошибка:* введите число")
+
+@router.message(SettingsStates.waiting_target_chat_id, F.text)
+async def save_target_chat_id(message: Message, state: FSMContext) -> None:
+	"""Сохраняет ID целевого чата."""
+	if not message.from_user or not message.text:
+		return
+
+	try:
+		chat_id = int(message.text.strip())
+		if chat_id >= 0:
+			await message.answer("*Ошибка:* ID группы должен начинаться с минуса")
+			return
+
+		await set_target_chat_id(message.from_user.id, chat_id)
+		await state.clear()
+
+		user = await get_user_by_tg_id(message.from_user.id)
+		if user is None:
+			return
+
+		await message.answer(
+			render_settings_text(user),
+			reply_markup=get_settings_keyboard(),
+		)
+	except ValueError:
+		await message.answer("*Ошибка:* введите число")
