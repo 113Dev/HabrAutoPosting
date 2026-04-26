@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: habr_password
       POSTGRES_DB: habr_autopost
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     ports:
       - "5432:5432"
     healthcheck:
