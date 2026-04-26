@@ -55,13 +55,9 @@ cd HabrAutoPost
 
 ```env
 BOT_TOKEN="ваш_токен_от_BotFather"
-SQLALCHEMY_URL="postgresql+asyncpg://berlogavpn:misha1102@localhost/hat"
+SQLALCHEMY_URL="postgresql+asyncpg://Юзернейм:Пароль@localhost/НазваниеДБ" # Для локального запуска
 ```
 
-**Важно:** Для Docker используйте `db` вместо `localhost`:
-```env
-SQLALCHEMY_URL="postgresql+asyncpg://berlogavpn:misha1102@db/hat"
-```
 
 ### 6. Запуск через Docker (рекомендуется)
 
@@ -82,8 +78,8 @@ docker-compose down -v
 ### 7. Запуск без Docker (локально)
 
 **Требования:**
-- Python 3.14+
-- PostgreSQL 18+
+- Python 3.14.2
+- PostgreSQL 18
 
 **Установка зависимостей:**
 
@@ -94,12 +90,20 @@ pip install -r requirements.txt
 **Запуск PostgreSQL:**
 
 ```bash
-# Создайте базу данных
-createdb hat
-
-# Или через psql
+# Подключитесь к PostgreSQL
 psql -U postgres
-CREATE DATABASE hat;
+
+# Создайте пользователя (замените Юзернейм и Пароль на свои значения)
+CREATE USER Юзернейм WITH PASSWORD 'Пароль';
+
+# Создайте базу данных (замените НазваниеДБ на свое название)
+CREATE DATABASE НазваниеДБ;
+
+# Дайте права пользователю на базу данных
+GRANT ALL PRIVILEGES ON DATABASE НазваниеДБ TO Юзернейм;
+
+# Выйдите из psql
+\q
 ```
 
 **Запуск бота:**
@@ -113,10 +117,16 @@ python main.py
 
 ### Первый запуск
 
-1. Найдите вашего бота в Telegram по username
-2. Отправьте команду `/start`
-3. Нажмите "Настройки"
-4. Заполните все необходимые параметры:
+1. **Добавьте бота в канал как администратора:**
+   - Откройте ваш Telegram-канал
+   - Перейдите в настройки канала → Администраторы
+   - Добавьте вашего бота
+   - Выдайте права: **Публикация сообщений** (Post messages)
+   
+2. Найдите вашего бота в Telegram по username
+3. Отправьте команду `/start`
+4. Нажмите "Настройки"
+5. Заполните все необходимые параметры:
    - **API ключ** - ваш Gemini API ключ
    - **Модель** - название модели (по умолчанию `gemini-2.5-flash-lite`)
    - **URL** - адрес RSS-ленты Habr (по умолчанию `ru/feed/`)
@@ -190,8 +200,8 @@ HabrAutoPost/
 
 - `CHECK_NEW_ARTICLE_INTERVAL_SECONDS` - интервал проверки новых статей (по умолчанию 3600 сек / 1 час)
 - `POLL_INTERVAL_SECONDS` - максимальное время ожидания (по умолчанию 7200 сек / 2 часа)
-- `SEND_DELAY_SECONDS` - задержка между отправкой частей статьи (по умолчанию 3 сек)
-- `RETRY_DELAY_SECONDS` - задержка перед повторной попыткой при ошибке (по умолчанию 60 сек)
+- `SEND_DELAY_SECONDS` - задержка между отправкой частей статьи (по умолчанию 1 сек)
+- `RETRY_DELAY_SECONDS` - задержка перед повторной попыткой при ошибке (по умолчанию 10 сек)
 
 ## Устранение неполадок
 
@@ -216,7 +226,7 @@ HabrAutoPost/
 
 - Проверьте квоты API на [Google AI Studio](https://aistudio.google.com/)
 - Убедитесь, что API ключ активен
-- Попробуйте другую модель (например, `gemini-1.5-flash`)
+- Попробуйте другую модель (например, `gemini-2.0-flash`)
 
 ### Docker проблемы
 
@@ -232,11 +242,3 @@ docker build -t habrautopost .
 - Храните API ключи в безопасности
 - Регулярно обновляйте зависимости
 - Используйте сильные пароли для PostgreSQL
-
-## Лицензия
-
-MIT License
-
-## Поддержка
-
-Если у вас возникли проблемы или вопросы, создайте issue в репозитории.

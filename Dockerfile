@@ -8,9 +8,12 @@ RUN apk add --no-cache \
     gcc \
     musl-dev \
     postgresql-dev \
-    libffi-dev && \
-    RUN pip install --no-cache-dir -i https://yandex.net -r requirements.txt && \
-    apk del gcc musl-dev libffi-dev
+    libffi-dev \
+    libxml2-dev \
+    libxslt-dev && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apk del gcc musl-dev libffi-dev libxml2-dev libxslt-dev && \
+    apk add --no-cache postgresql-libs
 
 COPY src/ ./src/
 
